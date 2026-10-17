@@ -3,65 +3,106 @@ import os
 
 DATA_FILE = "learn2earn_data.json"
 
+# Persistence
 def save_data():
-    data = {"resources": resources, "borrow_records": borrow_records}
+    data = {
+        "resources": resources,
+        "fellows": fellows,
+        "borrow_records": borrow_records,
+    }
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
     print(f"Data saved to {DATA_FILE}.")
 
 
 def load_data():
-    global resources, borrow_records
+    global resources, fellows, borrow_records
     if not os.path.exists(DATA_FILE):
         return
-    with open(DATA_FILE, "r") as f:
-        data = json.load(f)
+    try:
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"Warning: could not load {DATA_FILE}: {exc}")
+        return
     resources = data.get("resources", resources)
+    fellows = data.get("fellows", fellows)
     borrow_records = data.get("borrow_records", borrow_records)
     print(f"Data loaded from {DATA_FILE}.")
 
-# starting data
-resources = [
+# Default (starting) data
+DEFAULT_RESOURCES = [
     {"id": "R001", "name": "Laptop", "category": "Electronics", "total": 10, "available": 10},
     {"id": "R002", "name": "Keyboard", "category": "Accessories", "total": 5, "available": 5},
     {"id": "R003", "name": "Headset", "category": "Accessories", "total": 3, "available": 3},
 ]
+DEFAULT_FELLOWS = {"F001": "Ada", "F002": "John", "F003": "Grace"}
 
-fellows = {"F001": "Ada", "F002": "John", "F003": "Grace"}
+resources = [dict(r) for r in DEFAULT_RESOURCES]  # deep-ish copy
+fellows = dict(DEFAULT_FELLOWS)
 borrow_records = []
 
-#helper functions
+
+# Helpers
 def find_resource(resource_id):
-    """Return the resource dict with this ID, or None if not found."""
     for r in resources:
         if r["id"] == resource_id:
             return r
     return None
 
+
 def find_fellow(fellow_id):
-    """Return the fellow's name, or None if not found."""
     return fellows.get(fellow_id)
+
 
 def get_borrowed(fellow_id, resource_id):
     """How many of this resource does this fellow currently have on loan?"""
     total = 0
-    for a in borrow_records:
-        if a["fellow_id"] == fellow_id and a["resource_id"] == resource_id:
-            total += a["quantity"]
+    for rec in borrow_records:
+        if rec["fellow_id"] == fellow_id and rec["resource_id"] == resource_id:
+            total += rec["quantity"]
     return total
 
-#Adding and listing Resource
+
+def add_fellow(fellow_id, name):
+    if fellow_id in fellows:
+        print(f"Error: Fellow ID {fellow_id} already exists.")
+        return False
+    if not name.strip():
+        print("Error: Fellow name cannot be empty.")
+        return False
+    fellows[fellow_id] = name.strip()
+    print(f"Added fellow {name} ({fellow_id}).")
+    return True
+
+
+def list_fellows():
+    if not fellows:
+        print("No fellows registered.")
+        return
+    print(f"{'ID':<6}{'Name':<20}")
+    print("-" * 26)
+    for fid, name in fellows.items():
+        print(f"{fid:<6}{name:<20}")
+
+
+# Adding and listing resource
 def add_resource(resource_id, name, category, total):
-    # Reject duplicate IDs
     if find_resource(resource_id) is not None:
         print(f"Error: Resource ID {resource_id} already exists.")
         return False
-    if total <= 0:
+    if not isinstance(total, int) or isinstance(total, bool) or total <= 0:
         print("Error: Total units must be a positive integer.")
         return False
+    if not name.strip():
+        print("Error: Resource name cannot be empty.")
+        return False
     resources.append({
-        "id": resource_id, "name": name, "category": category,
-        "total": total, "available": total,
+        "id": resource_id,
+        "name": name.strip(),
+        "category": category.strip() or "Uncategorized",
+        "total": total,
+        "available": total,
     })
     print(f"Added {name} ({resource_id}) with {total} units.")
     return True
@@ -74,9 +115,13 @@ def list_resources():
     print(f"{'ID':<6}{'Name':<15}{'Category':<15}{'Total':<8}{'Available':<10}")
     print("-" * 54)
     for r in resources:
-        print(f"{r['id']:<6}{r['name']:<15}{r['category']:<15}{r['total']:<8}{r['available']:<10}")
+        print(
+            f"{r['id']:<6}{r['name']:<15}{r['category']:<15}"
+            f"{r['total']:<8}{r['available']:<10}"
+        )
 
-#borrowing
+
+# Borrowing
 def borrow_resource(fellow_id, resource_id, quantity):
     # 1. Validate fellow
     if find_fellow(fellow_id) is None:
@@ -89,17 +134,18 @@ def borrow_resource(fellow_id, resource_id, quantity):
         print(f"Error: Resource ID {resource_id} not found.")
         return False
 
-    # 3. Validate quantity (positive integer)
-    if not isinstance(quantity, int) or quantity <= 0:
+    # 3. Validate quantity (positive int; reject bools)
+    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
         print("Error: Quantity must be a positive integer.")
         return False
 
     # 4. Validate stock
     if quantity > resource["available"]:
-        print(f"Error: Only {resource['available']} unit(s) of {resource['name']} available.")
+        print(f"Error: Only {resource['available']} unit(s) of "
+              f"{resource['name']} available.")
         return False
 
-    # All checks passed — now mutate state
+    # All checks passed — mutate state
     resource["available"] -= quantity
     borrow_records.append({
         "fellow_id": fellow_id,
@@ -110,7 +156,8 @@ def borrow_resource(fellow_id, resource_id, quantity):
     print(f"Available {resource['name']} units = {resource['available']}.")
     return True
 
-#returning
+
+# Returning
 def return_resource(fellow_id, resource_id, quantity):
     if find_fellow(fellow_id) is None:
         print(f"Error: Fellow ID {fellow_id} not found.")
@@ -121,16 +168,17 @@ def return_resource(fellow_id, resource_id, quantity):
         print(f"Error: Resource ID {resource_id} not found.")
         return False
 
-    if not isinstance(quantity, int) or quantity <= 0:
+    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
         print("Error: Quantity must be a positive integer.")
         return False
 
-    on_loan = get_borrowed_quantity(fellow_id, resource_id)
+    on_loan = get_borrowed(fellow_id, resource_id)     # FIXED: correct helper name
     if quantity > on_loan:
-        print(f"Error: {find_fellow(fellow_id)} only has {on_loan} x {resource['name']} on loan.")
+        print(f"Error: {find_fellow(fellow_id)} only has "
+              f"{on_loan} x {resource['name']} on loan.")
         return False
 
-    # Reduce from borrow_records (could be spread across multiple records)
+    # Reduce from borrow_records (may span multiple records)
     remaining = quantity
     for rec in borrow_records:
         if remaining == 0:
@@ -140,7 +188,7 @@ def return_resource(fellow_id, resource_id, quantity):
             rec["quantity"] -= take
             remaining -= take
 
-    # Remove empty records
+    # Remove zero-quantity records 
     borrow_records[:] = [rec for rec in borrow_records if rec["quantity"] > 0]
 
     resource["available"] += quantity
@@ -148,31 +196,41 @@ def return_resource(fellow_id, resource_id, quantity):
     print(f"Available {resource['name']} units = {resource['available']}.")
     return True
 
-#search and filter
+
+# Search and filter
 def search_by_name(query):
-    query = query.lower()
+    query = query.strip().lower()
+    if not query:
+        print("Search query cannot be empty.")
+        return []
     results = [r for r in resources if query in r["name"].lower()]
     if not results:
         print(f"No resources match '{query}'.")
     else:
         print(f"Found {len(results)} match(es):")
         for r in results:
-            print(f"  {r['id']} - {r['name']} ({r['category']}) available: {r['available']}/{r['total']}")
+            print(f"  {r['id']} - {r['name']} ({r['category']}) "
+                  f"available: {r['available']}/{r['total']}")
     return results
 
 
 def filter_by_category(category):
-    category = category.lower()
+    category = category.strip().lower()
+    if not category:
+        print("Category cannot be empty.")
+        return []
     results = [r for r in resources if r["category"].lower() == category]
     if not results:
         print(f"No resources in category '{category}'.")
     else:
         print(f"Found {len(results)} resource(s) in '{category}':")
         for r in results:
-            print(f"  {r['id']} - {r['name']} available: {r['available']}/{r['total']}")
+            print(f"  {r['id']} - {r['name']} "
+                  f"available: {r['available']}/{r['total']}")
     return results
 
-# Reports
+
+# Reporting
 def generate_report():
     total_units = sum(r["total"] for r in resources)
     total_available = sum(r["available"] for r in resources)
@@ -192,12 +250,11 @@ def generate_report():
     else:
         print("\nNo low-stock resources.")
 
-    # Most borrowed (handle ties)
     if not borrow_records:
         print("\nNo borrowing activity yet.")
         return
 
-    # Sum borrowed quantity per resource
+    # Sum currently-borrowed quantity per resource
     borrowed_per_resource = {}
     for rec in borrow_records:
         rid = rec["resource_id"]
@@ -206,12 +263,14 @@ def generate_report():
     max_borrowed = max(borrowed_per_resource.values())
     leaders = [rid for rid, qty in borrowed_per_resource.items() if qty == max_borrowed]
 
-    print("\nMost borrowed resource(s):")
+    print("\nMost borrowed resource(s) currently out on loan:")
     for rid in leaders:
         r = find_resource(rid)
-        print(f"  {r['name']}: {max_borrowed} unit(s) currently borrowed")
+        if r is not None:
+            print(f"  {r['name']}: {max_borrowed} unit(s)")
 
-#the menu
+
+# Menu
 def print_menu():
     print("\n===== Learn2Earn Menu =====")
     print("1. List resources")
@@ -222,6 +281,8 @@ def print_menu():
     print("6. Filter by category")
     print("7. Generate report")
     print("8. Run demonstration (steps 1-7)")
+    print("9. List fellows")
+    print("10. Add fellow")
     print("0. Exit")
 
 
@@ -231,14 +292,18 @@ def get_positive_int(prompt):
         raw = input(prompt).strip()
         try:
             value = int(raw)
-            if value <= 0:
-                print("Please enter a positive integer.")
-                continue
-            return value
         except ValueError:
             print(f"'{raw}' is not a valid integer. Try again.")
+            continue
+        if value <= 0:
+            print("Please enter a positive integer.")
+            continue
+        return value
+
 
 def main():
+    load_data() 
+
     while True:
         print_menu()
         choice = input("Choose an option: ").strip()
@@ -271,19 +336,24 @@ def main():
             generate_report()
         elif choice == "8":
             run_demonstration()
+        elif choice == "9":
+            list_fellows()
+        elif choice == "10":
+            fid = input("Fellow ID: ").strip()
+            name = input("Fellow name: ").strip()
+            add_fellow(fid, name)
         elif choice == "0":
+            save_data()  # FIXED: save on exit
             print("Goodbye!")
             break
         else:
             print(f"Unknown option '{choice}'. Please try again.")
 
 
-if __name__ == "__main__":
-    main()
-
-#the demonstration
+# Demonstration (must be defined before main() is invoked)
 def run_demonstration():
-    print("\n########## DEMONSTRATION ##########")
+    print("\n******* DEMONSTRATION *********")
+    print("(Demo runs on current in-memory state.)")
 
     print("\n--- Step 1: F001 borrows 2 laptops ---")
     borrow_resource("F001", "R001", 2)
@@ -306,6 +376,11 @@ def run_demonstration():
     print("\n--- Step 7: Generate report ---")
     generate_report()
 
-    print("\n--- Extra: invalid input test ---")
-    borrow_resource("F001", "R001", -3)   # negative
-    borrow_resource("F001", "R001", "two")  # wrong type
+    print("\n--- Extra: invalid input tests ---")
+    borrow_resource("F001", "R001", -3)     
+    borrow_resource("F001", "R001", "two")  
+    borrow_resource("F001", "R001", True)   
+
+# Entry point
+if __name__ == "__main__":
+    main()
